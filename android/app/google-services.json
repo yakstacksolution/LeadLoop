@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "639860565744",
+    "project_id": "hamro-futsal-lead",
+    "storage_bucket": "hamro-futsal-lead.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:639860565744:android:11ce4f29f82ca8e167c435",
+        "android_client_info": {
+          "package_name": "com.np.hamrofutsal.lead"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "639860565744-i89hnphabuj72gndtk10tld7k5rqbrmr.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.np.hamrofutsal.lead",
+            "certificate_hash": "36b82586eeb253fc0a242f395a37408c2dc01710"
+          }
+        },
+        {
+          "client_id": "639860565744-nddl96md2lb8258etdtr1j3k0m97rho3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA1h4PAJ3VqMiw9Z_3-SBC7EwPdDirWDnU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "639860565744-nddl96md2lb8258etdtr1j3k0m97rho3.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "639860565744-oft4ivn94n043faam2mkf4elrff83ha0.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.np.hamrofutsal.lead"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

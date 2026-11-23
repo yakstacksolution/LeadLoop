@@ -1,0 +1,16 @@
+{
+  "name": "hamro-futsal-functions",
+  "description": "Privileged server-side operations for Hamro Futsal lead management.",
+  "main": "index.js",
+  "engines": { "node": "22" },
+  "scripts": {
+    "serve": "firebase emulators:start --only functions,firestore,auth",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.2",
+    "firebase-functions": "^6.3.2"
+  },
+  "private": true
+}

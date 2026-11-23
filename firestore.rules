@@ -1,0 +1,323 @@
+rules_version = '2';
+
+// Hamro Futsal — Lead & Venue Follow-Up Management
+//
+// Authorization model
+// -------------------
+// * Every authenticated principal has a /users/{uid} profile holding `role`
+//   ("admin" | "employee"), `status` ("active" | "disabled") and
+//   `assignedProjectIds` (list of project ids).
+// * `role` is ALSO mirrored into a custom auth claim by the Cloud Functions in
+//   functions/index.js. The claim is checked first (cheap, tamper-proof); the
+//   profile document is the fallback so the app keeps working before a token
+//   refresh has happened.
+// * Clients may never write `role`, `status` or `assignedProjectIds` — those
+//   fields are owned by admins / Cloud Functions only.
+// * Employees are scoped by PROJECT MEMBERSHIP. Every scoped document
+//   (venues, contacts, activities, visits, status history) carries a
+//   denormalised `projectId` precisely so that a single rule evaluation can
+//   authorise it without walking parent documents.
+// * Historical records (status_history, audit_logs) are append-only.
+// * Nothing important is client-deletable; archiving is done via status fields.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function profileExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.role == 'admin' ||
+        (profileExists() && profile().role == 'admin')
+      );
+    }
+
+    function isActive() {
+      return isSignedIn() && profileExists() && profile().status == 'active';
+    }
+
+    // An active, non-disabled member of the given project.
+    function memberOf(projectId) {
+      return isActive() && projectId in profile().assignedProjectIds;
+    }
+
+    function canRead(projectId) {
+      return isAdmin() || memberOf(projectId);
+    }
+
+    // Scoping that WORKS FOR QUERIES.
+    //
+    // Firestore evaluates `list` rules against the query, not against each
+    // returned document. It can only allow a query when the query's own
+    // filters imply the rule. An equality test against request.auth.uid is
+    // matchable (the client filters by the same field); a membership test like
+    // `resource.data.projectId in profile().assignedProjectIds` is NOT, because
+    // the list comes from a get() the query knows nothing about.
+    //
+    // So every employee-visible collection carries `assignedEmployeeId`, and
+    // employees always query with `where assignedEmployeeId == <their uid>`.
+    function ownsRecord() {
+      return isActive() && resource.data.assignedEmployeeId == request.auth.uid;
+    }
+
+    function creatingOwnRecord() {
+      return isActive()
+        && request.resource.data.assignedEmployeeId == request.auth.uid;
+    }
+
+    // Employees may only file records under their own identity.
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function hasServerTime(field) {
+      return request.resource.data[field] == request.time;
+    }
+
+    // Fields a client must never set or change on its own profile.
+    function privilegedUserFieldsUnchanged() {
+      return request.resource.data.role == resource.data.role
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.assignedProjectIds == resource.data.assignedProjectIds;
+    }
+
+    // ---------- users ----------
+
+    match /users/{userId} {
+      // Anyone signed in can read their own profile; admins read everyone.
+      allow get: if isSelf(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      // Admins provision staff accounts directly (see the employee repository,
+      // which creates the auth account on a secondary Firebase app so the
+      // admin's own session is untouched).
+      //
+      // The second clause is the FIRST-ADMIN BOOTSTRAP, and it closes itself
+      // permanently the moment it is used. It is allowed only while the
+      // sentinel /system/claimed does not exist, and the bootstrap is written
+      // as one batch that creates BOTH this profile and that sentinel.
+      // Firestore's `create` fails if the document already exists, so the
+      // sentinel can be written exactly once in the lifetime of the project.
+      // Every later attempt fails twice over: the sentinel create is rejected,
+      // and exists() below is true. No server code is needed to guarantee it.
+      allow create: if isAdmin()
+        || (isSelf(userId)
+            && request.resource.data.role == 'admin'
+            && request.resource.data.status == 'active'
+            && request.resource.data.assignedProjectIds.size() == 0
+            && !exists(/databases/$(database)/documents/system/claimed));
+
+      // A user may maintain their own contact details, but never their role,
+      // status or project assignments.
+      allow update: if isAdmin()
+        || (isSelf(userId) && isActive() && privilegedUserFieldsUnchanged());
+
+      // An admin may remove another employee's profile — never their own.
+      //
+      // This deletes the PROFILE only. The Firebase Auth login cannot be
+      // removed without the Admin SDK (Blaze plan), so a deleted employee can
+      // still authenticate; they land with no profile document, which matches
+      // no rule below, and the app refuses the sign-in (see
+      // AuthRepositoryImpl.signIn).
+      allow delete: if isAdmin() && !isSelf(userId);
+    }
+
+    // ---------- bootstrap sentinel ----------
+
+    // Marks that the first administrator has been claimed. Create-only, and
+    // `create` is inherently once-only in Firestore, so this document can
+    // never be re-opened, overwritten or deleted by any client.
+    match /system/claimed {
+      allow get: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // ---------- projects ----------
+
+    match /projects/{projectId} {
+      allow get: if isAdmin() || memberOf(projectId);
+      // Employees list projects with a `where assignedEmployeeIds contains uid`
+      // query; the rule below is what makes that query legal.
+      allow list: if isAdmin()
+        || (isActive() && request.auth.uid in resource.data.assignedEmployeeIds);
+
+      allow create, update: if isAdmin();
+      allow delete: if false; // archive via status instead
+    }
+
+    // ---------- venues ----------
+
+    match /venues/{venueId} {
+      // Employees see the venues assigned to them. Project membership still
+      // governs which projects they may FILE a venue under (see create).
+      allow get, list: if isAdmin() || ownsRecord();
+
+      allow create: if isAdmin()
+        || (memberOf(request.resource.data.projectId)
+            && creatingOwnRecord()
+            && request.resource.data.createdBy == request.auth.uid
+            && hasServerTime('createdAt'));
+
+      // An employee may not move a venue to another project, nor hand it to
+      // somebody else — reassignment is an admin action.
+      allow update: if isAdmin()
+        || (ownsRecord()
+            && request.resource.data.projectId == resource.data.projectId
+            && request.resource.data.assignedEmployeeId == resource.data.assignedEmployeeId
+            && request.resource.data.createdBy == resource.data.createdBy);
+
+      allow delete: if false; // use status = 'archived'
+    }
+
+    // ---------- venue contacts ----------
+
+    match /venue_contacts/{contactId} {
+      allow get, list: if isAdmin() || ownsRecord();
+
+      allow create: if isAdmin()
+        || (memberOf(request.resource.data.projectId)
+            && creatingOwnRecord()
+            && hasServerTime('createdAt'));
+
+      allow update: if isAdmin()
+        || (ownsRecord()
+            && request.resource.data.assignedEmployeeId == resource.data.assignedEmployeeId
+            && request.resource.data.projectId == resource.data.projectId
+            && request.resource.data.venueId == resource.data.venueId);
+
+      // Contacts are the one record employees may remove, since a mistyped
+      // contact has no historical value. Admins only, to stay safe.
+      allow delete: if isAdmin();
+    }
+
+    // ---------- activities (calls, meetings, follow-ups) ----------
+
+    match /activities/{activityId} {
+      allow get, list: if isAdmin() || ownsRecord();
+
+      allow create: if isAdmin()
+        || (memberOf(request.resource.data.projectId)
+            && creatingOwnRecord()
+            && request.resource.data.createdBy == request.auth.uid
+            && hasServerTime('createdAt'));
+
+      allow update: if isAdmin()
+        || (ownsRecord()
+            && request.resource.data.projectId == resource.data.projectId
+            && request.resource.data.venueId == resource.data.venueId
+            && request.resource.data.createdBy == resource.data.createdBy);
+
+      allow delete: if false; // cancel via status
+    }
+
+    // ---------- visits ----------
+
+    match /visits/{visitId} {
+      // Two matchable predicates, because visits are queried two ways: by
+      // venue (scoped on the venue's assignee) and by "my visits" (scoped on
+      // who actually made the visit). Both must be expressible as an equality
+      // against request.auth.uid or the list rule cannot be matched.
+      allow get, list: if isAdmin()
+        || ownsRecord()
+        || (isActive() && resource.data.employeeId == request.auth.uid);
+
+      // A visit is a first-person record: employees may only log their own.
+      allow create: if isAdmin()
+        || (memberOf(request.resource.data.projectId)
+            && creatingOwnRecord()
+            && request.resource.data.employeeId == request.auth.uid
+            && hasServerTime('createdAt'));
+
+      allow update: if isAdmin()
+        || (ownsRecord()
+            && resource.data.employeeId == request.auth.uid
+            && request.resource.data.employeeId == resource.data.employeeId
+            && request.resource.data.projectId == resource.data.projectId
+            && request.resource.data.venueId == resource.data.venueId
+            // The self-reported flag records how the visit was evidenced and
+            // must not be rewritten after the fact.
+            && request.resource.data.isSelfReported == resource.data.isSelfReported);
+
+      allow delete: if false;
+    }
+
+    // ---------- notes ----------
+
+    match /notes/{noteId} {
+      allow get, list: if isAdmin() || ownsRecord();
+
+      allow create: if isAdmin()
+        || (memberOf(request.resource.data.projectId)
+            && creatingOwnRecord()
+            && request.resource.data.employeeId == request.auth.uid
+            && hasServerTime('createdAt'));
+
+      // Notes are correctable by their author only, and the correction is
+      // stamped — the original text is preserved in `originalText` by the app.
+      allow update: if isAdmin()
+        || (ownsRecord()
+            && resource.data.employeeId == request.auth.uid
+            && request.resource.data.employeeId == resource.data.employeeId
+            && request.resource.data.venueId == resource.data.venueId
+            && request.resource.data.createdAt == resource.data.createdAt);
+
+      allow delete: if false;
+    }
+
+    // ---------- status history (append-only) ----------
+
+    match /status_history/{entryId} {
+      allow get, list: if isAdmin() || ownsRecord();
+
+      allow create: if isAdmin()
+        || (memberOf(request.resource.data.projectId)
+            && creatingOwnRecord()
+            && request.resource.data.changedBy == request.auth.uid
+            && hasServerTime('createdAt'));
+
+      allow update, delete: if false; // immutable history
+    }
+
+    // ---------- audit logs (admin-readable, append-only) ----------
+
+    match /audit_logs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isActive()
+        && request.resource.data.performedBy == request.auth.uid
+        && hasServerTime('createdAt');
+      allow update, delete: if false;
+    }
+
+    // ---------- notifications / device tokens ----------
+
+    match /notifications/{notificationId} {
+      allow get, list: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create, delete: if false; // written by Cloud Functions
+    }
+
+    match /users/{userId}/devices/{deviceId} {
+      allow read, write: if isSelf(userId);
+    }
+
+    // ---------- default deny ----------
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

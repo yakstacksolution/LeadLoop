@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "leadloop" "\0"
+            VALUE "CompanyName", "com.np.hamrofutsal.lead" "\0"
+            VALUE "FileDescription", "futsal_lead" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "leadloop" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "leadloop.exe" "\0"
-            VALUE "ProductName", "leadloop" "\0"
+            VALUE "InternalName", "futsal_lead" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.np.hamrofutsal.lead. All rights reserved." "\0"
+            VALUE "OriginalFilename", "futsal_lead.exe" "\0"
+            VALUE "ProductName", "futsal_lead" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

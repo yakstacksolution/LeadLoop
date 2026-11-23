@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>639860565744-oft4ivn94n043faam2mkf4elrff83ha0.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.639860565744-oft4ivn94n043faam2mkf4elrff83ha0</string>
+	<key>API_KEY</key>
+	<string>AIzaSyBkkx2AUb9mu-aYWvY68ojbu59bB3kuozA</string>
+	<key>GCM_SENDER_ID</key>
+	<string>639860565744</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.np.hamrofutsal.lead</string>
+	<key>PROJECT_ID</key>
+	<string>hamro-futsal-lead</string>
+	<key>STORAGE_BUCKET</key>
+	<string>hamro-futsal-lead.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:639860565744:ios:a796faf6e69037c067c435</string>
+</dict>
+</plist>
